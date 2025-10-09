@@ -1,0 +1,34 @@
+
+version: "3.9"
+services:
+  paddle:
+    build: ./paddle-service
+    ports: ["8501:8501"]
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "2g"
+
+  classifier:
+    build: ./classifier-service
+    ports: ["8601:8601"]
+    environment:
+      - MODEL_PATH=/models/meter_type.onnx
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "1g"
+
+  api:
+    build: ./spring-boot-api
+    environment:
+      - JAVA_OPTS=-Xms512m -Xmx1024m
+      - PADDLE_URL=http://paddle:8501/paddle/ocr
+      - CLASSIFIER_URL=http://classifier:8601/classify
+      - TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
+    ports: ["8080:8080"]
+    depends_on:
+      - paddle
+      - classifier

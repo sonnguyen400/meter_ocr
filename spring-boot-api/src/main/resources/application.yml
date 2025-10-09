@@ -1,0 +1,10 @@
+
+spring:
+  main:
+    banner-mode: "off"
+server:
+  port: 8080
+app:
+  paddle-url: ${PADDLE_URL:http://localhost:8501/paddle/ocr}
+  classifier-url: ${CLASSIFIER_URL:http://localhost:8601/classify}
+  tessdata-prefix: ${TESSDATA_PREFIX:}
