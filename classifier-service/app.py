@@ -49,7 +49,6 @@ async def classify(file: UploadFile = File(...)):
         scharry = cv2.Scharr(blur, cv2.CV_32F, 0, 1)
         sx = float(np.mean(np.abs(scharrx))); sy = float(np.mean(np.abs(scharry)))
         hv_ratio = sx/(sy+1e-6)
-        import numpy as np
         p_lcd = np.clip(0.55 + 0.25*max(0.0, hv_ratio-1.0) + 0.2*max(0.0, 0.25-edge_density), 0.05, 0.95)
         d = {"lcd_digital": float(p_lcd), "flip_mechanical": float(1.0-p_lcd)}
         return Resp(type="lcd_digital" if p_lcd>=0.5 else "flip_mechanical", probs=d, used="heuristic")
