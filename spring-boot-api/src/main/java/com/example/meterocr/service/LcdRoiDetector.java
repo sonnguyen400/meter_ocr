@@ -54,6 +54,10 @@ public class LcdRoiDetector {
         findContours(thresh.clone(), contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
 
         Rect bestRect = null; double bestScore = 0.0;
+        for(long i=0;i<contours.size();i++){
+            Mat c = contours.get(i);
+            Rect r = boundingRect(c);
+        }
         for (long i = 0; i < contours.size(); i++) {
             Mat c = contours.get(i);
             Rect r = boundingRect(c);
