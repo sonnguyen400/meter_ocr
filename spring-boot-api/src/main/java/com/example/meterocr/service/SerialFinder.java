@@ -1,6 +1,7 @@
 package com.example.meterocr.service;
 
 import com.example.meterocr.model.Box;
+import com.example.meterocr.util.BoxUtil;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -53,14 +54,14 @@ public class SerialFinder {
         final int DISTANCE_THRESHOLD = 200;
 
         for (Box label : serialLabels) {
-            List<Double> labelCenter = getCenter(label);
+            List<Double> labelCenter = BoxUtil.getCenter(label);
 
             for (Box valueRect : potentialValues) {
                 String valueText = valueRect.getText().trim();
 
                 if (valueText.length() < 3) continue;
 
-                List<Double> valueCenter = getCenter(valueRect);
+                List<Double> valueCenter = BoxUtil.getCenter(valueRect);
 
                 double distance = calculateDistance(labelCenter, valueCenter);
                 double distanceY = Math.abs(labelCenter.getLast() - valueCenter.getLast());
@@ -91,22 +92,5 @@ public class SerialFinder {
             }
             return "";
         }
-    }
-
-    public static List<Double> getCenter(Box box) {
-        if (box == null || box.getPolygon().size() != 4) {
-            // Trường hợp lỗi, trả về một điểm mặc định
-            return List.of(0.0, 0.0);
-        }
-
-        double minX = box.getPolygon().stream().mapToDouble(p -> p.stream().findFirst().orElse(0d)).min().orElse(0);
-        double maxX = box.getPolygon().stream().mapToDouble(p -> p.stream().findFirst().orElse(0d)).max().orElse(0);
-        double minY = box.getPolygon().stream().mapToDouble(p -> p.isEmpty() ? 0d : p.getLast()).min().orElse(0);
-        double maxY = box.getPolygon().stream().mapToDouble(p -> p.isEmpty() ? 0d : p.getLast()).max().orElse(0);
-
-        double centerX = (minX + maxX) / 2;
-        double centerY = (minY + maxY) / 2;
-
-        return List.of(centerX, centerY);
     }
 }

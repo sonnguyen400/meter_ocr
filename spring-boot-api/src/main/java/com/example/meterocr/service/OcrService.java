@@ -2,6 +2,7 @@
 package com.example.meterocr.service;
 
 import com.example.meterocr.model.Box;
+import com.example.meterocr.model.MeterIndexReading;
 import com.example.meterocr.model.MeterProfile;
 import com.example.meterocr.model.MeterType;
 import com.example.meterocr.model.PreprocessResult;
@@ -78,24 +79,34 @@ public class OcrService {
         // 1) PaddleOCR on full image
         List<Box> boxes = paddle.ocr(rotatedBytes);
 
-        // 2) Reading/Serial from Paddle full image
-        String readingPaddle = boxes.stream().map(Box::getText).map(RegexUtils::normalize)
-                .filter(RegexUtils::looksLikeReading).max(Comparator.comparingInt(String::length)).orElse(null);
-        double confReadingPaddle = boxes.stream()
-                .filter(b -> RegexUtils.looksLikeReading(RegexUtils.normalize(b.getText())))
-                .mapToDouble(Box::getConf).max().orElse(0.0);
 
+        // 2) Reading/Serial from Paddle full image
         String serialPaddle = SerialFinder.findSerialNumber(boxes);
         if (serialPaddle.isEmpty()) {
             serialPaddle = boxes.stream().map(Box::getText).map(RegexUtils::normalize)
                     .filter(RegexUtils::looksLikeSerial).findFirst().orElse(null);
         }
 
+        String unit = boxes.stream()
+                .map(it -> RegexUtils.extractUnit(it.getText()))
+                .filter(it -> !it.isBlank())
+                .findFirst()
+                .orElse("");
+
+        if(MultiIndexMeterExtractor.isThreePhaseMeter(boxes)){
+            return this.extractMultiPhaseIndices(boxes, serialPaddle,unit,  profile);
+        }
+        String readingPaddle = boxes.stream().map(Box::getText).map(RegexUtils::normalize)
+                .filter(RegexUtils::looksLikeReading).max(Comparator.comparingInt(String::length)).orElse(null);
+        double confReadingPaddle = boxes.stream()
+                .filter(b -> RegexUtils.looksLikeReading(RegexUtils.normalize(b.getText())))
+                .mapToDouble(Box::getConf).max().orElse(0.0);
+
 
         // 3) LCD ROI detection
 //        Rect lcdRect = roiRes != null ? roiRes.rect : null;
         RoiResult roiResult = this.meterDisplayDetectionService.detectMeterDisplay(pp.rotated(), type, true);
-        System.out.println(roiResult);
+
         Rect roiRect = Optional.ofNullable(roiResult).map(RoiResult::getRect).orElse(null);
         // 3.5) Rectify ROI (smart)
         Mat rectifiedColor = null;
@@ -109,14 +120,14 @@ public class OcrService {
                 rectifiedSize = rect.size;
             }
         }
-        if (rectifiedBin != null) imwrite("test1.jpg", new Mat(pp.rotated(), roiRect));
+        if (Boolean.TRUE.equals(debug)) imwrite("test1.jpg", new Mat(pp.rotated(), roiRect));
 
         // 4) PaddleOCR again on ROI (prefer rectified)
         if (roiRect != null && roiRect.width() > 0 && roiRect.height() > 0) {
             Mat roiColor = new Mat(pp.rotated(), roiRect).clone();
             Mat prep = this.meterImagePreprocessor.enhance(roiColor);
             BytePointer out2 = new BytePointer();
-            imwrite("test2.jpg", prep);
+            if (Boolean.TRUE.equals(debug)) imwrite("test2.jpg", prep);
             imencode(".jpg", prep, out2);
             byte[] roiBytes = new byte[(int) out2.limit()];
             out2.get(roiBytes);
@@ -143,7 +154,7 @@ public class OcrService {
         if (roiRect != null && roiRect.width() > 0 && roiRect.height() > 0) {
             Mat roiBin = new Mat(pp.bin(), roiRect).clone();
             Mat roiBinScaled = ImageUtils.resizeToMinHeight(roiBin, profile.tesseract.resize_min_height);
-            imwrite("test3.jpg", roiBinScaled);
+            if (Boolean.TRUE.equals(debug)) imwrite("test3.jpg", roiBinScaled);
             BufferedImage binBI = ImageUtils.matToBufferedImage(roiBinScaled);
             Tesseract t = new Tesseract();
             String tessRaw = t.doOCR(binBI);
@@ -167,15 +178,10 @@ public class OcrService {
             primary = "tesseract";
             finalConf = Math.max(confReadingTess, confReadingPaddle);
         }
-        //7 read meter unit
-        String unit = boxes.stream()
-                .map(it -> RegexUtils.extractUnit(it.getText()))
-                .filter(it -> !it.isBlank())
-                .findFirst()
-                .orElse("");
+
 
         Map<String, Object> res = new LinkedHashMap<>();
-        res.put("meter_reading", finalReading);
+        res.put("meter_reading", List.of(new MeterIndexReading("default", finalReading)));
         res.put("serial_number", serialPaddle);
         res.put("unit", unit);
         Map<String, Object> engine = new LinkedHashMap<>();
@@ -212,6 +218,21 @@ public class OcrService {
         }
 
         if (detectScores != null) res.put("detect_scores", detectScores);
+        return res;
+    }
+
+    private Map<String, Object> extractMultiPhaseIndices(List<Box> boxes,String serialPaddle, String unit, MeterProfile profile) {
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("meter_reading", MultiIndexMeterExtractor.extractPhaseIndices(boxes));
+        res.put("serial_number", serialPaddle);
+        res.put("unit", unit);
+        Map<String, Object> engine = new LinkedHashMap<>();
+        engine.put("primary", "paddleocr");
+        engine.put("fallback", "paddleocr");
+        res.put("engine", engine);
+        res.put("boxes", boxes);
+        Map<String, Object> ppinfo = new LinkedHashMap<>();
+        ppinfo.put("binarized", true);
         return res;
     }
 }

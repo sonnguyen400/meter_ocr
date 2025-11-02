@@ -175,11 +175,8 @@ public class MeterDisplayDetectionService {
         for (int i = 0; i < contours.size(); i++) {
             Mat contour = contours.get(i);
             Rect rect = boundingRect(contour);
-            System.out.println(new RoiResult(rect, 0, meterType, profile));
-
             RoiResult roiResult = this.calculateRoiResult(rect, meterType, image, profile);
             if (Objects.nonNull(roiResult)) {
-                System.out.println(roiResult);
                 candidates.add(roiResult);
             }
         }
