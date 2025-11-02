@@ -9,10 +9,11 @@ public class MeterProfile {
     public static class RoiConfig {
         public final int[] blackhat_kernel = new int[]{25,7};
         public final int[] close_kernel = new int[]{35,5};
-        public final double[] hrange = new double[]{0.01,0.12};
-        public final double bestMinAspect = 3.5d;
-        public final double bestMaxAspect = 10d;
-        public final double hr_best = 0.07;
+        public final double[] hrange = new double[]{0.03,0.215};
+        public final double[] wrange = new double[]{0.25, 1};
+        public final double bestMinAspect = 3.2d;
+        public final double bestMaxAspect = 7d;
+        public final double hr_best = 0.085;
         public final double expand_x = 0.10;
         public final double expand_y = 0.05;
     }

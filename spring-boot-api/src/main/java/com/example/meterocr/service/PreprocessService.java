@@ -16,6 +16,10 @@ import org.springframework.stereotype.Service;
 import static org.bytedeco.opencv.global.opencv_core.BORDER_REPLICATE;
 import static org.bytedeco.opencv.global.opencv_core.CV_8U;
 import static org.bytedeco.opencv.global.opencv_core.addWeighted;
+import static org.bytedeco.opencv.global.opencv_core.bitwise_and;
+import static org.bytedeco.opencv.global.opencv_core.minMaxLoc;
+import static org.bytedeco.opencv.global.opencv_core.subtract;
+import static org.bytedeco.opencv.global.opencv_core.normalize;
 import static org.bytedeco.opencv.global.opencv_imgcodecs.IMREAD_COLOR;
 import static org.bytedeco.opencv.global.opencv_imgcodecs.imdecode;
 import static org.bytedeco.opencv.global.opencv_imgproc.ADAPTIVE_THRESH_GAUSSIAN_C;
@@ -24,13 +28,23 @@ import static org.bytedeco.opencv.global.opencv_imgproc.Canny;
 import static org.bytedeco.opencv.global.opencv_imgproc.GaussianBlur;
 import static org.bytedeco.opencv.global.opencv_imgproc.HoughLinesP;
 import static org.bytedeco.opencv.global.opencv_imgproc.INTER_LINEAR;
+import static org.bytedeco.opencv.global.opencv_imgproc.MORPH_CLOSE;
+import static org.bytedeco.opencv.global.opencv_imgproc.MORPH_ELLIPSE;
+import static org.bytedeco.opencv.global.opencv_imgproc.MORPH_OPEN;
+import static org.bytedeco.opencv.global.opencv_imgproc.MORPH_RECT;
 import static org.bytedeco.opencv.global.opencv_imgproc.THRESH_BINARY;
 import static org.bytedeco.opencv.global.opencv_imgproc.adaptiveThreshold;
+import static org.bytedeco.opencv.global.opencv_imgproc.bilateralFilter;
 import static org.bytedeco.opencv.global.opencv_imgproc.createCLAHE;
 import static org.bytedeco.opencv.global.opencv_imgproc.cvtColor;
+import static org.bytedeco.opencv.global.opencv_imgproc.dilate;
+import static org.bytedeco.opencv.global.opencv_imgproc.erode;
 import static org.bytedeco.opencv.global.opencv_imgproc.getRotationMatrix2D;
+import static org.bytedeco.opencv.global.opencv_imgproc.getStructuringElement;
+import static org.bytedeco.opencv.global.opencv_imgproc.morphologyEx;
 import static org.bytedeco.opencv.global.opencv_imgproc.warpAffine;
 import static org.bytedeco.opencv.global.opencv_photo.fastNlMeansDenoising;
+import static org.opencv.core.Core.NORM_MINMAX;
 
 @Service
 public class PreprocessService {
@@ -88,32 +102,110 @@ public class PreprocessService {
     }
 
     public Mat preprocess(Mat mat){
-        Mat gray = new Mat();
-        cvtColor(mat, gray, COLOR_BGR2GRAY);
+        Mat processed = mat.clone();
 
-        Mat edges = new Mat();
-        Canny(gray, edges, 50, 150);
-        Mat lines = new Mat();
-        Vec4iVector linesVec = new Vec4iVector();
-        HoughLinesP(edges, linesVec, 1, Math.PI / 180, 60, 60, 10);
-        double angle = estimateSkewAngle(lines);
+        if (processed.channels() > 1) {
+            Mat gray = new Mat();
+            cvtColor(processed, gray, COLOR_BGR2GRAY);
+            processed.release();
+            processed = gray;
+        }
 
-        Mat rotated = rotate(mat, angle);
+        // Bước 1: Cân bằng histogram cục bộ mạnh
+        Mat clahe = applyCLAHE(processed, 4.0, new int[]{8, 8});
+        processed.release();
 
-        Mat gray2 = new Mat();
-        cvtColor(rotated, gray2, COLOR_BGR2GRAY);
+        // Bước 2: Bilateral filter - giảm nhiễu nhưng giữ cạnh sắc nét
+        Mat filtered = new Mat();
+        bilateralFilter(clahe, filtered, 7, 75, 75);
+        clahe.release();
 
-        // Denoise
-        Mat denoised = new Mat();
-        fastNlMeansDenoising(gray2, denoised, 3, 7, 21);
-        // Sharpen using unsharp masking
-        Mat blurred = new Mat();
-        GaussianBlur(denoised, blurred, new Size(0, 0), 3);
-        Mat sharpened = new Mat();
-        addWeighted(denoised, 1.5, blurred, -0.5, 0, sharpened);
+        // Bước 3: Tăng độ tương phản
+        Mat contrasted = new Mat();
+        filtered.convertTo(contrasted, -1, 1.5, -50); // alpha=1.5, beta=-50
+        filtered.release();
 
-        return sharpened;
+        // Đảm bảo giá trị trong khoảng [0, 255]
+        // Tìm min/max
+        double minVal[] = new double[1];
+        double maxVal[] = new double[1];
+        minMaxLoc(contrasted, minVal, maxVal, null, null, null);
+
+        // Normalize thủ công bằng convertTo
+        Mat normalized = new Mat();
+        contrasted.convertTo(normalized, CV_8U,
+                255.0 / (maxVal[0] - minVal[0]),           // alpha (scale)
+                -minVal[0] * 255.0 / (maxVal[0] - minVal[0])  // beta (shift)
+        );
+
+        // Bước 4: Adaptive threshold với 2 pass
+        // Pass 1: Block size lớn để bắt cấu trúc tổng thể
+        Mat thresh1 = new Mat();
+        adaptiveThreshold(normalized, thresh1, 255,
+                ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY,
+                51, 10);
+
+        // Pass 2: Block size nhỏ để bắt chi tiết
+        Mat thresh2 = new Mat();
+        adaptiveThreshold(normalized, thresh2, 255,
+                ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY,
+                21, 8);
+        normalized.release();
+
+        // Kết hợp 2 threshold
+        Mat combined = new Mat();
+        bitwise_and(thresh1, thresh2, combined);
+        thresh1.release();
+        thresh2.release();
+
+        // Bước 5: Morphological cleaning
+        // Loại bỏ nhiễu nhỏ
+        Mat kernelOpen = getStructuringElement(MORPH_RECT, new Size(2, 2));
+        Mat opened = new Mat();
+        morphologyEx(combined, opened, MORPH_OPEN, kernelOpen);
+        combined.release();
+        kernelOpen.release();
+
+        // Kết nối các phần chữ số bị đứt
+        Mat kernelClose = getStructuringElement(MORPH_ELLIPSE, new Size(3, 3));
+        Mat closed = new Mat();
+        morphologyEx(opened, closed, MORPH_CLOSE, kernelClose);
+        opened.release();
+        kernelClose.release();
+
+        // Bước 6: Xóa các đường thẳng dọc (rãnh phân cách)
+        Mat noLines = removeVerticalLines(closed);
+        closed.release();
+
+        return noLines;
     }
+    private Mat applyCLAHE(Mat gray, double clipLimit, int[] tileSize) {
+        CLAHE clahe = createCLAHE(clipLimit, new Size(tileSize[0], tileSize[1]));
+        Mat result = new Mat();
+        clahe.apply(gray, result);
+        clahe.close();
+        return result;
+    }
+
+    private Mat removeVerticalLines(Mat binary) {
+        // Tạo kernel dọc dài để phát hiện đường thẳng dọc
+        Mat verticalKernel = getStructuringElement(MORPH_RECT, new Size(1, 15));
+
+        // Erode và dilate để tìm đường thẳng dọc
+        Mat verticalLines = new Mat();
+        erode(binary, verticalLines, verticalKernel);
+        dilate(verticalLines, verticalLines, verticalKernel);
+
+        // Xóa đường thẳng dọc khỏi ảnh gốc
+        Mat result = new Mat();
+        subtract(binary, verticalLines, result);
+
+        verticalKernel.release();
+        verticalLines.release();
+
+        return result;
+    }
+
 
     private Mat rotate(Mat src, double angle) {
         Point2f center = new Point2f(src.cols() / 2f, src.rows() / 2f);

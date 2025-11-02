@@ -1,6 +1,7 @@
 
 package com.example.meterocr.model;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class Box {
@@ -17,4 +18,7 @@ public class Box {
     public void setConf(double conf) { this.conf = conf; }
     public List<List<Double>> getPolygon() { return polygon; }
     public void setPolygon(List<List<Double>> polygon) { this.polygon = polygon; }
+    public List<Double> getCenter(){
+        return new ArrayList<>();
+    }
 }

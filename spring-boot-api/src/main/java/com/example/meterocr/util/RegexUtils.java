@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 
 public class RegexUtils {
     public static final Pattern READING = Pattern.compile(
-            "(?i)\\b(\\w{1,9}(?:[.,]\\d{1,3})?)(?!\\d)\\s*[-_\\s]*?(điện|dien|kwh|kw|volt|v|kilowatt|nước|nuoc|m3|lit|lít|liter|khối|khoi|)\\b"
+            "(?i)\\b(\\w{1,9}(?:[.,]\\d{1,3})?)(?!\\d)\\s*[-_\\s]*?(điện|dien|kwh|kw|volt|v|kilowatt|nước|nuoc|m3|lit|lít|liter|khối|khoi|){3,8}\\b"
     );
     //    private static final Pattern SERIAL = Pattern.compile("\\b[A-Z0-9-]{6,}\\b");
     public static final Pattern SERIAL = Pattern.compile("(?i)\\b(?:Serial|SX|SR)?[A-Z0-9-]{6,}\\b");
@@ -23,7 +23,7 @@ public class RegexUtils {
     }
 
     public static boolean looksLikeReading(String s) {
-        if (s == null) return false;
+        if (s == null || s.length() < 3 || s.length() > 9) return false;
         return READING.matcher(s).find();
     }
 

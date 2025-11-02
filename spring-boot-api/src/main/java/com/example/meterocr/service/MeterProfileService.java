@@ -2,6 +2,7 @@
 package com.example.meterocr.service;
 
 import com.example.meterocr.model.MeterProfile;
+import com.example.meterocr.model.MeterType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
@@ -12,6 +13,7 @@ import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class MeterProfileService {
@@ -39,9 +41,9 @@ public class MeterProfileService {
         }
     }
 
-    public MeterProfile get(String name) {
-        if (name == null || name.isBlank()) return profiles.get("lcd_digital");
-        return profiles.getOrDefault(name, profiles.get("lcd_digital"));
+    public MeterProfile get(MeterType meterType) {
+        if (Objects.isNull(meterType) || MeterType.AUTO.equals(meterType)) return profiles.get("lcd_digital");
+        return profiles.getOrDefault(meterType.value, profiles.get("lcd_digital"));
     }
 
     public Map<String, MeterProfile> all() { return profiles; }

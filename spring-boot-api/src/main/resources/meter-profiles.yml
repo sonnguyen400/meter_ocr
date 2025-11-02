@@ -1,13 +1,6 @@
 
 profiles:
   lcd_digital:
-    roi:
-      blackhat_kernel: [25, 7]
-      close_kernel: [35, 5]
-      hrange: [0.01, 0.12]
-      hr_best: 0.06
-      expand_x: 0.10
-      expand_y: 0.05
     preprocess:
       clahe_clip: 3.0
       clahe_tile: [8, 8]
@@ -20,13 +13,6 @@ profiles:
       disable_dawg: true
       resize_min_height: 60
   flip_mechanical:
-    roi:
-      blackhat_kernel: [35, 9]
-      close_kernel: [45, 7]
-      hrange: [0.05, 0.25]
-      hr_best: 0.15
-      expand_x: 0.07
-      expand_y: 0.05
     preprocess:
       clahe_clip: 2.5
       clahe_tile: [8, 8]

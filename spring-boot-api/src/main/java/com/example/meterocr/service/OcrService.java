@@ -3,7 +3,9 @@ package com.example.meterocr.service;
 
 import com.example.meterocr.model.Box;
 import com.example.meterocr.model.MeterProfile;
+import com.example.meterocr.model.MeterType;
 import com.example.meterocr.model.PreprocessResult;
+import com.example.meterocr.model.RoiResult;
 import com.example.meterocr.util.ImageUtils;
 import com.example.meterocr.util.RegexUtils;
 import net.sourceforge.tess4j.Tesseract;
@@ -20,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Matcher;
 
 import static org.bytedeco.opencv.global.opencv_imgcodecs.imencode;
@@ -40,11 +43,12 @@ public class OcrService {
     private final RectifyService rectifier;
     private final ClassifierClient classifier;
     private final MeterDisplayDetectionService meterDisplayDetectionService;
+    private final MeterImagePreprocessor meterImagePreprocessor;
 
     public OcrService(PreprocessService preprocess, PaddleClient paddle, TesseractService tesseract,
                       LcdRoiDetector lcdDetector, MeterProfileService profileService,
                       TypeDetectorService typeDetector, RectifyService rectifier, ClassifierClient classifier,
-                      MeterDisplayDetectionService meterDisplayDetectionService) {
+                      MeterDisplayDetectionService meterDisplayDetectionService, MeterImagePreprocessor meterImagePreprocessor) {
         this.preprocess = preprocess;
         this.paddle = paddle;
         this.tesseract = tesseract;
@@ -54,51 +58,14 @@ public class OcrService {
         this.rectifier = rectifier;
         this.classifier = classifier;
         this.meterDisplayDetectionService = meterDisplayDetectionService;
+        this.meterImagePreprocessor = meterImagePreprocessor;
     }
 
-    public Map<String, Object> process(byte[] imageBytes, String type, boolean debug) throws Exception {
+    public Map<String, Object> process(byte[] imageBytes, MeterType type, boolean debug) throws Exception {
         long t0 = System.currentTimeMillis();
-        String resolvedType;
         Map<String, Object> detectScores = null;
-        if (type == null || type.isBlank() || type.equalsIgnoreCase("auto")) {
-            String clsType = null;
-            java.util.Map<String, Double> clsProbs = null;
-            String used = null;
-            try {
-                var cls = classifier.classify(imageBytes);
-                clsType = cls.type;
-                clsProbs = cls.probs;
-                used = cls.used;
-            } catch (Exception ignore) {
-            }
-            if (clsProbs != null) {
-                double maxp = 0.0;
-                for (Double v : clsProbs.values()) maxp = Math.max(maxp, v);
-                if (maxp >= 0.55) {
-                    resolvedType = clsType;
-                } else {
-                    resolvedType = null;
-                }
-                java.util.Map<String, Object> clsMap = new java.util.LinkedHashMap<>();
-                clsMap.put("probs", clsProbs);
-                clsMap.put("used", used);
-                if (clsMap.get("probs") != null) {
-                    if (detectScores == null) detectScores = new java.util.LinkedHashMap<>();
-                    detectScores.put("classifier", clsMap);
-                }
-            } else {
-                resolvedType = null;
-            }
-            if (resolvedType == null) {
-                var det = typeDetector.detect(imageBytes);
-                resolvedType = det.type;
-                detectScores = det.scores;
-            }
-        } else {
-            resolvedType = type;
-        }
 
-        MeterProfile profile = profileService.get(resolvedType);
+        MeterProfile profile = profileService.get(type);
 
         PreprocessResult pp = preprocess.preprocess(imageBytes, profile);
 
@@ -126,31 +93,31 @@ public class OcrService {
 
 
         // 3) LCD ROI detection
-        LcdRoiDetector.RoiResult roiRes = lcdDetector.detect(pp.rotated(), profile);
 //        Rect lcdRect = roiRes != null ? roiRes.rect : null;
-        Rect lcdRect = this.meterDisplayDetectionService.detectMeterDisplay(pp.rotated(), profile, MeterDisplayDetectionService.MeterType.AUTO, true);
-
+        RoiResult roiResult = this.meterDisplayDetectionService.detectMeterDisplay(pp.rotated(), type, true);
+        System.out.println(roiResult);
+        Rect roiRect = Optional.ofNullable(roiResult).map(RoiResult::getRect).orElse(null);
         // 3.5) Rectify ROI (smart)
         Mat rectifiedColor = null;
         Mat rectifiedBin = null;
         org.bytedeco.opencv.opencv_core.Size rectifiedSize = null;
-        if (lcdRect != null && lcdRect.width() > 0 && lcdRect.height() > 0) {
-            var rect = rectifier.rectifySmart(pp.rotated(), pp.bin(), lcdRect, boxes);
+        if (roiRect != null && roiRect.width() > 0 && roiRect.height() > 0) {
+            var rect = rectifier.rectifySmart(pp.rotated(), pp.bin(), roiRect, boxes);
             if (rect != null) {
                 rectifiedColor = rect.color;
                 rectifiedBin = rect.bin;
                 rectifiedSize = rect.size;
             }
         }
-        if (rectifiedBin != null) imwrite("test1.jpg", new Mat(pp.rotated(), lcdRect));
+        if (rectifiedBin != null) imwrite("test1.jpg", new Mat(pp.rotated(), roiRect));
 
         // 4) PaddleOCR again on ROI (prefer rectified)
-        if (lcdRect != null && lcdRect.width() > 0 && lcdRect.height() > 0) {
-            Mat roiColor = (rectifiedColor != null ? rectifiedColor : new Mat(pp.rotated(), lcdRect).clone());
-            Mat processed = this.preprocess.preprocess(roiColor);
-            imwrite("test2.jpg", processed);
+        if (roiRect != null && roiRect.width() > 0 && roiRect.height() > 0) {
+            Mat roiColor = new Mat(pp.rotated(), roiRect).clone();
+            Mat prep = this.meterImagePreprocessor.enhance(roiColor);
             BytePointer out2 = new BytePointer();
-            imencode(".jpg", processed, out2);
+            imwrite("test2.jpg", prep);
+            imencode(".jpg", prep, out2);
             byte[] roiBytes = new byte[(int) out2.limit()];
             out2.get(roiBytes);
             List<Box> roiBoxes = paddle.ocr(roiBytes);
@@ -165,14 +132,16 @@ public class OcrService {
                 confReadingPaddle = roiBoxes.stream()
                         .filter(b -> RegexUtils.looksLikeReading(RegexUtils.normalize(b.getText())))
                         .mapToDouble(Box::getConf).max().orElse(confReadingPaddle);
+                confReadingPaddle = Math.min(0.99, 0.7 + 0.3 * Math.min(1.0, roiResult.getScore()));
+
             }
         }
 
         // 5) Tesseract on ROI bin (with resize)
         String readingTess = null;
         double confReadingTess = 0.0;
-        if (lcdRect != null && lcdRect.width() > 0 && lcdRect.height() > 0) {
-            Mat roiBin = (rectifiedBin != null ? rectifiedBin : new Mat(pp.bin(), lcdRect).clone());
+        if (roiRect != null && roiRect.width() > 0 && roiRect.height() > 0) {
+            Mat roiBin = new Mat(pp.bin(), roiRect).clone();
             Mat roiBinScaled = ImageUtils.resizeToMinHeight(roiBin, profile.tesseract.resize_min_height);
             imwrite("test3.jpg", roiBinScaled);
             BufferedImage binBI = ImageUtils.matToBufferedImage(roiBinScaled);
@@ -182,7 +151,7 @@ public class OcrService {
             if (Objects.nonNull(readingTess)) {
                 readingTess = readingTess.replaceAll("[^0-9]", "0");
             }
-            confReadingTess = (readingTess != null && !readingTess.isBlank()) ? Math.min(0.99, 0.7 + 0.3 * Math.min(1.0, roiRes.score)) : 0.0;
+            confReadingTess = (readingTess != null && !readingTess.isBlank()) ? Math.min(0.99, 0.7 + 0.3 * Math.min(1.0, roiResult.getScore())) : 0.0;
         }
 
         // 6) Ensemble
@@ -218,21 +187,21 @@ public class OcrService {
         Map<String, Object> ppinfo = new LinkedHashMap<>();
         ppinfo.put("rotation_deg", pp.angle());
         ppinfo.put("binarized", true);
-        if (lcdRect != null) {
-            ppinfo.put("lcd_roi", Map.of("x", lcdRect.x(), "y", lcdRect.y(), "w", lcdRect.width(), "h", lcdRect.height(), "score", roiRes.score));
+        if (roiRect != null) {
+            ppinfo.put(roiResult.getMeterType().value, Map.of("x", roiRect.x(), "y", roiRect.y(), "w", roiRect.width(), "h", roiRect.height(), "score", roiResult.getScore()));
         }
-        ppinfo.put("profile", resolvedType);
+        ppinfo.put("profile", type);
         res.put("preprocess", ppinfo);
         res.put("elapsed_ms", System.currentTimeMillis() - t0);
 
         if (debug) {
             try {
                 Mat dbg = pp.rotated().clone();
-                if (lcdRect != null) {
+                if (roiRect != null) {
                     com.example.meterocr.util.DebugOverlayUtils.drawPaddleBoxes(dbg, boxes);
-                    rectangle(dbg, lcdRect, new Scalar(0, 255, 0, 0), 2, LINE_AA, 0);
+                    rectangle(dbg, roiRect, new Scalar(0, 255, 0, 0), 2, LINE_AA, 0);
                 }
-                putText(dbg, "type=" + resolvedType, new Point(10, 30), FONT_HERSHEY_SIMPLEX, 1.0, new Scalar(0, 255, 0, 0), 2, LINE_AA, false);
+                putText(dbg, "type=" + type, new Point(10, 30), FONT_HERSHEY_SIMPLEX, 1.0, new Scalar(0, 255, 0, 0), 2, LINE_AA, false);
                 BytePointer dbgBuf = new BytePointer();
                 imencode(".png", dbg, dbgBuf);
                 byte[] b = new byte[(int) dbgBuf.limit()];

@@ -75,7 +75,7 @@ public class RectifyService {
 
     public RectifyResult rectify(Mat rotatedColor, Mat rotatedBin, Rect roi) {
         if (rotatedColor == null || rotatedColor.empty() || roi == null) return null;
-        Rect r = expand(roi, rotatedColor.cols(), rotatedColor.rows(), 0.08, 0.06);
+        Rect r = expand(roi, rotatedColor.cols(), rotatedColor.rows(), 0.03, 0.01);
         Mat binCrop = new Mat(rotatedBin, r).clone();
         Mat colorCrop = new Mat(rotatedColor, r).clone();
 

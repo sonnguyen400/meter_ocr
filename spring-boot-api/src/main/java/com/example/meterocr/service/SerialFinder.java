@@ -16,7 +16,7 @@ public class SerialFinder {
 
 
     public static String findSerialNumber(List<Box> boxes) {
-        List<String> serialKeywords = Arrays.asList("NO", "S/N", "SERIAL", "MÃ SỐ", "SERI");
+        List<String> serialKeywords = Arrays.asList("NO", "S/N", "SERIAL", "MÃ SỐ", "SERI", "PDM");
 
         // 1. Phân loại Rects
         List<Box> serialLabels = new ArrayList<>();

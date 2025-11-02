@@ -9,17 +9,23 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
 @Service
 public class PaddleClient {
-    private final OkHttpClient client = new OkHttpClient();
+    private final OkHttpClient client;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Value("${app.paddle-url}")
     private String paddleUrl;
 
+    public PaddleClient(){
+        this.client = new OkHttpClient().newBuilder()
+                .callTimeout(Duration.ofSeconds(20))
+                .build();
+    }
     public List<Box> ocr(byte[] imageBytes) throws IOException {
         MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
                 .addFormDataPart("file", "image.jpg",
