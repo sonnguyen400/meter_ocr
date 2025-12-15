@@ -3,7 +3,6 @@ package com.example.meterocr.service;
 import com.example.meterocr.model.Box;
 import com.example.meterocr.model.MeterIndexReading;
 import com.example.meterocr.util.BoxUtil;
-import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -39,7 +38,7 @@ public class MultiIndexMeterExtractor {
         List<MeterIndexReading> results = new ArrayList<>();
 
         // Pattern để tìm tên pha (L1, L2, L3)
-        Pattern phasePattern = Pattern.compile("\\bL[123]\\b", Pattern.CASE_INSENSITIVE);
+        Pattern phasePattern = Pattern.compile("\\b[LT][123]\\b", Pattern.CASE_INSENSITIVE);
 
         // Pattern để tìm số (có thể có dấu phẩy hoặc chấm thập phân)
         Pattern numberPattern = Pattern.compile("^\\d+[.,]?\\d*$");
